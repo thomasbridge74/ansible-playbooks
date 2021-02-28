@@ -1,0 +1,82 @@
+---
+- name: "Install k8s"
+  hosts: control
+  become: yes
+  become_method: sudo
+  gather_facts: false
+
+  tasks:
+
+    - name: "Install required packages"
+      yum:
+        name:
+          - yum-utils
+          - device-mapper-persistent-data
+          - lvm2
+        state: present
+
+    - name: "Add Docker repo"
+      copy:
+        src: files/docker.repo
+        dest: /etc/yum.repos.d/docker-ce.repo
+
+    - name: "Install Docker packages"
+      yum:
+        # These are specific based on the instructions on the kubernetes.io page:
+        # https://kubernetes.io/docs/setup/production-environment/container-runtimes/#docker
+        name:
+          - containerd.io
+          - docker-ce
+          - docker-ce-cli
+        state: present
+
+    - name: "Create Docker config folder"
+      file:
+        path: /etc/docker
+        state: directory
+
+    - name: "Copy daemon.json file"
+      copy:
+        src: "files/daemon.json"
+        dest: "/etc/docker/daemon.json"
+#        owner: docker
+#        group: docker
+
+    - name: "Create systemd folder"
+      file:
+        path: /etc/systemd/system/docker.service.d
+        state: directory
+
+    - name: "Start Docker daemon"
+      systemd:
+        daemon_reload: yes
+        name: docker
+        enabled: yes
+        state: started
+
+    # Following the steps here:
+    # https://kubernetes.io/docs/setup/production-environment/tools/kubeadm/install-kubeadm/
+    -
+    - name: "Install Kubernetes Repo"
+      copy:
+        src: files/kubernetes.repo
+        dest: /etc/yum.repos.d/kubernetes.repo
+
+    - name: "SELinux needs to be in permissive mode"
+      selinux:
+        policy: targeted
+        state: permissive
+
+    - name: "Ensure SELinux remains permissive after reboot"
+      copy:
+        src: files/selinux
+        dest: /etc/selinux/config
+
+    - name: "Install kubelet, kubeadm, kubectl"
+      yum:
+        name:
+          - kubelet
+          - kubeadm
+          - kubectl
+        state: present
+        disable_excludes: kubernetes
