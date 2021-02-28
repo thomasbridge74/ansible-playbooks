@@ -1,0 +1,17 @@
+---
+
+# Put this in a seperate file as it's not idempotent.
+# An alternative might be to check if swap is on and
+# only run it conditionally then.
+
+- name: "Install k8s"
+  hosts: all
+  become: yes
+  become_method: sudo
+  gather_facts: false
+
+  tasks:
+    - name: "Disable swap"
+      command: swapoff -a
+      become: true
+

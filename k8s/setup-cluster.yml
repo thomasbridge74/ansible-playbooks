@@ -1,6 +1,6 @@
 ---
 - name: "Install k8s"
-  hosts: control
+  hosts: all
   become: yes
   become_method: sudo
   gather_facts: false
@@ -72,6 +72,13 @@
         src: files/selinux
         dest: /etc/selinux/config
 
+    - name: Disable swap permanently, persist reboots
+      replace:
+        path: /etc/fstab
+        regexp: '^(\s*)([^#\n]+\s+)(\w+\s+)swap(\s+.*)$'
+        replace: '#\1\2\3swap\4'
+        backup: yes
+
     - name: "Install kubelet, kubeadm, kubectl"
       yum:
         name:
@@ -80,3 +87,102 @@
           - kubectl
         state: present
         disable_excludes: kubernetes
+
+    - name: "Start kubelet daemon"
+      systemd:
+        daemon_reload: yes
+        name: kubelet
+        enabled: yes
+        state: started
+
+- name: "Set up Control Device"
+  hosts: control
+  become: yes
+  become_method: sudo
+  gather_facts: false
+
+  tasks:
+    - name: "Remove port 6443 from firewalld"
+      ansible.posix.firewalld:
+        port: 6443/tcp
+        permanent: true
+        state: enabled
+        zone: public
+        immediate: yes
+
+    - name: "Remove port 10250 from firewalld"
+      ansible.posix.firewalld:
+        port: 10250/tcp
+        permanent: true
+        state: enabled
+        zone: public
+        immediate: yes
+
+    - name: "Check if configuration file exists"
+      stat:
+        path: /etc/kubernetes/admin.conf
+      register: filedetails
+
+    - debug:
+        var: filedetails
+        verbosity: 2
+
+    - name: "Initialise kubeadm"
+      command: kubeadm init --pod-network-cidr 172.16.0.0/16
+      when: not filedetails.stat.exists
+
+    - name: "Create .kube in {{ ansible_user }} home"
+      become: false
+      file:
+        path: "$HOME/.kube"
+        state: directory
+
+    - name: "Copy admin.conf to {{ ansible_user }} directory"
+      copy:
+        remote_src: yes
+        src: /etc/kubernetes/admin.conf
+        dest: "/home/{{ ansible_user}}/.kube/config"
+        owner: "{{ ansible_user }}"
+        group: "{{ ansible_user }}"
+
+    - name: "Get base pods for kube-system"
+      command: kubectl get pods -n kube-system
+      register: pods
+      become: false
+
+#    - debug:
+#        var: pods
+
+    - name: "Install Calico"
+      command: kubectl apply -f https://docs.projectcalico.org/manifests/calico.yaml
+      become: false
+      when: '"calico" not in pods.stdout'
+
+    - name: "Get Join Cluster command"
+      command: kubeadm token create --print-join-command
+      register: joincommand
+
+- name: "Setup the nodes"
+  hosts: node
+  gather_facts: false
+  become: yes
+  become_method: sudo
+
+  tasks:
+    - name: "Print Command"
+      debug:
+        var: hostvars['control-node']['joincommand']['stdout']
+        verbosity: 2
+
+    - name: "Set Hostname"
+      hostname:
+        name: "{{ inventory_hostname }}"
+
+    - name: "Check if Node has kubernetes running already"
+      stat:
+        path: /etc/kubernetes/kubelet.conf
+      register: node_details
+
+    - name: "Join Cluster"
+      command: "{{ hostvars['control-node']['joincommand']['stdout'] }}"
+      when: not node_details.stat.exists
