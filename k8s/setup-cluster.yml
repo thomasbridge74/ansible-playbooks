@@ -95,13 +95,6 @@
         enabled: yes
         state: started
 
-- name: "Set up Control Device"
-  hosts: control
-  become: yes
-  become_method: sudo
-  gather_facts: false
-
-  tasks:
     - name: "Remove port 6443 from firewalld"
       ansible.posix.firewalld:
         port: 6443/tcp
@@ -118,6 +111,13 @@
         zone: public
         immediate: yes
 
+- name: "Set up Control Device"
+  hosts: control
+  become: yes
+  become_method: sudo
+  gather_facts: false
+
+  tasks:
     - name: "Check if configuration file exists"
       stat:
         path: /etc/kubernetes/admin.conf
